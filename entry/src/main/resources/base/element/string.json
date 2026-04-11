@@ -1,0 +1,64 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Newma AI 聊天助手"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Newma AI 聊天应用"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Newma Chat"
+    },
+    {
+      "name": "app_name",
+      "value": "Newma Chat"
+    },
+    {
+      "name": "internet_reason",
+      "value": "需要网络连接以与AI助手通信"
+    },
+    {
+      "name": "connected",
+      "value": "已连接"
+    },
+    {
+      "name": "disconnected",
+      "value": "未连接"
+    },
+    {
+      "name": "connecting",
+      "value": "连接中..."
+    },
+    {
+      "name": "send",
+      "value": "发送"
+    },
+    {
+      "name": "input_placeholder",
+      "value": "输入消息..."
+    },
+    {
+      "name": "settings",
+      "value": "设置"
+    },
+    {
+      "name": "gateway_url",
+      "value": "Gateway 地址"
+    },
+    {
+      "name": "auto_reconnect",
+      "value": "自动重连"
+    },
+    {
+      "name": "clear_chat",
+      "value": "清空聊天"
+    },
+    {
+      "name": "version_info",
+      "value": "版本 1.0.0 (HarmonyOS)"
+    }
+  ]
+}
