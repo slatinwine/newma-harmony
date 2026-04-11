@@ -4,10 +4,8 @@ import {
   ConnectionConfig,
   ConnState,
   ClientInfo,
-  ConnectPayload,
-  AgentPayload,
-  AgentMessage,
-  ChatMessage
+  ConnectParams,
+  AgentParams
 } from '../model/GatewayTypes';
 
 type FrameHandler = (frame: GatewayFrame) => void;
@@ -65,11 +63,9 @@ export class GatewayConnection {
           text = data;
         } else {
           const view = new Uint8Array(data as ArrayBuffer);
-          const arr: number[] = [];
           for (let i = 0; i < view.length; i++) {
-            arr.push(view[i]);
+            text += String.fromCharCode(view[i]);
           }
-          text = String.fromCharCode.apply(null, arr);
         }
         if (text.length > 0) {
           this.onFrameReceived(text);
@@ -83,16 +79,6 @@ export class GatewayConnection {
       console.error('[GW] socket error');
       this.connState = ConnState.DISCONNECTED;
       this.notifyState();
-    });
-
-    this.ws.on('close', (err: Error, code: number, reason: string) => {
-      console.log('[GW] socket closed');
-      this.ws = null;
-      this.connState = ConnState.DISCONNECTED;
-      this.notifyState();
-      if (this.autoReconnect) {
-        this.tryReconnect();
-      }
     });
 
     this.ws.connect(this.url, (err: Error) => {
@@ -120,10 +106,7 @@ export class GatewayConnection {
   }
 
   sendAgent(text: string): void {
-    const params: string = JSON.stringify({
-      message: text,
-      sessionKey: this.sessionId
-    });
+    const params: AgentParams = { message: text, sessionKey: this.sessionId };
     const frame: string = JSON.stringify({
       type: 'req',
       id: `req-${++this.reqCounter}`,
@@ -207,16 +190,19 @@ export class GatewayConnection {
     // challenge → 发 connect
     if (frame.type === 'event' && frame.event === 'challenge') {
       const client: ClientInfo = {
-        id: 'harmonyos-app',
+        id: 'mobile-app',
         platform: 'harmonyos',
         version: '1.0.0',
         mode: 'operator'
+      };
+      const params: ConnectParams = {
+        client: { id: 'mobile-app', platform: 'harmonyos', version: '1.0.0', mode: 'operator' }
       };
       const connectFrame: string = JSON.stringify({
         type: 'req',
         id: `connect-${Date.now()}`,
         method: 'connect',
-        params: JSON.stringify({ client: client })
+        params: params
       });
       if (this.ws !== null) {
         this.ws.send(connectFrame);
@@ -224,30 +210,65 @@ export class GatewayConnection {
       return;
     }
 
-    // connect 响应 → 提取 sessionKey
-    if (frame.type === 'res' && frame.ok === true && frame.payload !== undefined) {
+    // connect 响应 → 从原始 JSON 提取 sessionKey
+    if (frame.type === 'res' && frame.ok === true) {
       try {
-        const payload: ConnectPayload = JSON.parse(frame.payload) as ConnectPayload;
-        if (payload.sessionKey !== undefined && payload.sessionKey.length > 0) {
-          this.sessionId = payload.sessionKey;
-          this.connState = ConnState.CONNECTED;
-          this.notifyState();
-          // flush queue
-          while (this.messageQueue.length > 0) {
-            const msg = this.messageQueue.shift();
-            if (msg !== undefined && this.ws !== null) {
-              this.ws.send(msg);
+        const key: string = '"sessionKey":"';
+        const keyIdx: number = raw.indexOf(key);
+        if (keyIdx !== -1) {
+          const start: number = keyIdx + key.length;
+          const endIdx: number = raw.indexOf('"', start);
+          if (endIdx !== -1) {
+            const sessionKey: string = raw.substring(start, endIdx);
+            this.sessionId = sessionKey;
+            this.connState = ConnState.CONNECTED;
+            this.notifyState();
+            while (this.messageQueue.length > 0) {
+              const msg = this.messageQueue.shift();
+              if (msg !== undefined && this.ws !== null) {
+                this.ws.send(msg);
+              }
             }
           }
         }
       } catch (e) {
-        // ignore parse error
+        // ignore
       }
       return;
     }
 
-    // agent 事件
+    // agent 事件 — payload 是对象，从 raw 提取并序列化为 string
     if (frame.type === 'event' && frame.event === 'agent') {
+      // 从 raw 中提取 payload 对象，重新序列化为 string
+      const payloadKey: string = '"payload":';
+      const payloadIdx: number = raw.indexOf(payloadKey);
+      if (payloadIdx !== -1) {
+        let start: number = payloadIdx + payloadKey.length;
+        while (start < raw.length && raw.charAt(start) === ' ') {
+          start++;
+        }
+        if (start < raw.length && raw.charAt(start) === '{') {
+          // 找到 payload 对象的闭合 }
+          let depth: number = 0;
+          let end: number = -1;
+          for (let i: number = start; i < raw.length; i++) {
+            if (raw.charAt(i) === '{') {
+              depth++;
+            } else if (raw.charAt(i) === '}') {
+              depth--;
+              if (depth === 0) {
+                end = i;
+                break;
+              }
+            }
+          }
+          if (end !== -1) {
+            // payload 对象本身序列化为 string（去掉外层引号的话不需要）
+            // 直接用 payload 子串作为 payloadStr 传给 ChatService
+            frame.payload = raw.substring(start, end + 1);
+          }
+        }
+      }
       const handlers = this.agentHandlers;
       for (let i = 0; i < handlers.length; i++) {
         try {

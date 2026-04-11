@@ -4,13 +4,16 @@ import { SettingsStore } from '../services/SettingsStore';
 import { MessageBubble } from '../components/MessageBubble';
 import { ConnectionStatus } from '../components/ConnectionStatus';
 import { InputBar } from '../components/InputBar';
-import { ChatMessage, ConnState } from '../model/GatewayTypes';
+import { ChatMessage, ConnState, ToolCallMessage, ToolResultMessage } from '../model/GatewayTypes';
 import { common } from '@kit.AbilityKit';
+
+// Union type for all message types
+type MessageItem = ChatMessage | ToolCallMessage | ToolResultMessage;
 
 @Entry
 @Component
 struct Index {
-  @State messages: ChatMessage[] = [];
+  @State messages: MessageItem[] = [];
   @State connState: ConnState = ConnState.DISCONNECTED;
   @State streamingText: string = '';
   @State isStreaming: boolean = false;
@@ -49,7 +52,7 @@ struct Index {
     });
 
     this.chatService.onMessage((msg: ChatMessage): void => {
-      const arr: ChatMessage[] = [];
+      const arr: MessageItem[] = [];
       for (let i = 0; i < this.messages.length; i++) {
         arr.push(this.messages[i]);
       }
@@ -67,6 +70,28 @@ struct Index {
         this.streamingText = this.streamingText + delta;
         this.scrollToBottom();
       }
+    });
+
+    // Handle tool call events
+    this.chatService.onToolCall((toolCall: ToolCallMessage): void => {
+      const arr: MessageItem[] = [];
+      for (let i = 0; i < this.messages.length; i++) {
+        arr.push(this.messages[i]);
+      }
+      arr.push(toolCall);
+      this.messages = arr;
+      this.scrollToBottom();
+    });
+
+    // Handle tool result events
+    this.chatService.onToolResult((toolResult: ToolResultMessage): void => {
+      const arr: MessageItem[] = [];
+      for (let i = 0; i < this.messages.length; i++) {
+        arr.push(this.messages[i]);
+      }
+      arr.push(toolResult);
+      this.messages = arr;
+      this.scrollToBottom();
     });
 
     this.connection.connect();
@@ -118,15 +143,36 @@ struct Index {
 
         // 消息列表
         List({ space: 4 }) {
-          ForEach(this.messages, (msg: ChatMessage, index?: number) => {
+          ForEach(this.messages, (msg: MessageItem, index?: number) => {
             ListItem() {
-              MessageBubble({
-                message: msg.content,
-                isUser: msg.role === 'user',
-                isSystem: msg.role === 'system'
-              })
+              if (msg.role === 'tool_call') {
+                const tc = msg as ToolCallMessage;
+                MessageBubble({
+                  message: tc.toolArgs,
+                  isUser: false,
+                  isSystem: false,
+                  isToolCall: true,
+                  toolName: tc.toolName
+                })
+              } else if (msg.role === 'tool_result') {
+                const tr = msg as ToolResultMessage;
+                MessageBubble({
+                  message: tr.result,
+                  isUser: false,
+                  isSystem: false,
+                  isToolResult: true,
+                  toolName: tr.toolName
+                })
+              } else {
+                const cm = msg as ChatMessage;
+                MessageBubble({
+                  message: cm.content,
+                  isUser: cm.role === 'user',
+                  isSystem: cm.role === 'system'
+                })
+              }
             }
-          }, (msg: ChatMessage, index?: number): string => {
+          }, (msg: MessageItem, index?: number): string => {
             if (msg.id !== undefined) {
               return msg.id;
             }
@@ -164,27 +210,24 @@ struct Index {
       .width('100%')
       .height('100%')
 
-      // 设置弹窗
-      if (this.showSettings) {
-        this.SettingsPanel()
-      }
     }
     .width('100%')
     .height('100%')
+
+    // 设置弹窗 - 使用 bindSheet
+    .bindSheet($$this.showSettings, this.SettingsPanelBuilder(), {
+      height: SheetSize.FIT_CONTENT,
+      dragBar: true,
+      backgroundColor: Color.White,
+      onDisappear: (): void => {
+        // dismissed
+      }
+    })
   }
 
   @Builder
-  SettingsPanel() {
-    Column() {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor('#80000000')
-        .onClick((): void => {
-          this.showSettings = false;
-        })
-
-      Column({ space: 16 }) {
+  SettingsPanelBuilder() {
+    Column({ space: 16 }) {
         Row() {
           Text('设置')
             .fontSize(20)
@@ -270,13 +313,7 @@ struct Index {
           .margin({ bottom: 20 })
       }
       .width('100%')
-      .borderRadius({ topLeft: 20, topRight: 20 })
-      .backgroundColor('#FFFFFF')
-      .padding({ top: 4 })
-      .alignItems(HorizontalAlign.Center)
-    }
-    .width('100%')
-    .height('100%')
-    .position({ x: 0, y: 0 })
+      .padding({ top: 4, left: 20, right: 20, bottom: 30 })
+      .alignItems(HorizontalAlign.Start)
   }
 }

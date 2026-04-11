@@ -43,6 +43,26 @@ export interface AgentEvent {
   message?: string;
   delta?: string;
   errorMessage?: string;
+  toolCalls?: ToolCallInfo[];
+  toolResult?: ToolResultInfo;
+}
+
+export interface ToolCallInfo {
+  id: string;
+  name: string;
+  args: ToolCallArgs;
+}
+
+export interface ToolCallArgs {
+  query?: string;
+  city?: string;
+  expression?: string;
+}
+
+export interface ToolResultInfo {
+  id: string;
+  name: string;
+  result: string;
 }
 
 export interface AgentMessage {
@@ -57,10 +77,37 @@ export interface AgentPayload {
   delta?: string;
   message?: AgentMessage;
   errorMessage?: string;
+  toolCalls?: ToolCallInfo[];
+  toolResult?: ToolResultInfo;
+}
+
+export interface ToolCallMessage {
+  role: string;
+  toolName: string;
+  toolArgs: string;
+  timestamp: number;
+  id: string;
+}
+
+export interface ToolResultMessage {
+  role: string;
+  toolName: string;
+  result: string;
+  timestamp: number;
+  id: string;
 }
 
 export interface ConnectPayload {
   sessionKey: string;
+}
+
+export interface ConnectParams {
+  client: ClientInfo;
+}
+
+export interface AgentParams {
+  message: string;
+  sessionKey: string | null;
 }
 
 export enum ConnState {
