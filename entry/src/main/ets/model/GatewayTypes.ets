@@ -1,21 +1,35 @@
 // Gateway 协议类型定义
 
+// 字典类型替代 ESObject
+export type StringDict = Record<string, string | number | boolean | null | undefined>;
+export type ParamsDict = Record<string, StringDict | string | number | boolean | null | undefined>;
+
 // Gateway 帧
 export interface GatewayFrame {
   type: 'req' | 'res' | 'event';
   id?: string;
   method?: string;
   event?: string;
-  params?: ESObject;
-  payload?: ESObject;
+  params?: ParamsDict;
+  payload?: PayloadDict;
   ok?: boolean;
   error?: GatewayError;
+}
+
+export interface PayloadDict {
+  [key: string]: string | number | boolean | null | undefined | StringDict;
+  sessionKey?: string;
+  runId?: string;
+  state?: string;
+  delta?: string;
+  message?: ChatMessage;
+  errorMessage?: string;
 }
 
 export interface GatewayError {
   code: string;
   message: string;
-  details?: ESObject;
+  details?: ParamsDict;
 }
 
 // 聊天消息
@@ -44,7 +58,7 @@ export interface ConnectionConfig {
   reconnectInterval: number;
 }
 
-// 连接状态
+// 连接状态枚举
 export enum ConnState {
   DISCONNECTED = 0,
   CONNECTING = 1,

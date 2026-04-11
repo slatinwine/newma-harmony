@@ -1,13 +1,14 @@
 import { GatewayConnection } from './GatewayConnection';
 import { GatewayFrame, ChatMessage, AgentEvent, ConnState } from '../model/GatewayTypes';
 
+// 类型定义
 type MessageHandler = (message: ChatMessage) => void;
 type StreamHandler = (delta: string, isFinal: boolean) => void;
 
 export class ChatService {
   private connection: GatewayConnection;
-  private messageHandlers: Set<MessageHandler> = new Set();
-  private streamHandlers: Set<StreamHandler> = new Set();
+  private messageHandlers: Set<MessageHandler> = new Set<MessageHandler>();
+  private streamHandlers: Set<StreamHandler> = new Set<StreamHandler>();
   private messages: ChatMessage[] = [];
 
   constructor(connection: GatewayConnection) {
@@ -15,34 +16,49 @@ export class ChatService {
 
     // 监听 agent 事件
     this.connection.on('agent', (frame: GatewayFrame) => {
+      if (frame.payload === undefined || frame.payload === null) {
+        return;
+      }
+
       const payload = frame.payload as AgentEvent;
       if (!payload) return;
 
-      if (payload.state === 'delta' && payload.delta) {
+      if (payload.state === 'delta' && payload.delta !== undefined && payload.delta !== null) {
         // 流式内容
-        this.streamHandlers.forEach(h => h(payload.delta!, false));
+        this.streamHandlers.forEach((h: StreamHandler) => {
+          h(payload.delta!, false);
+        });
       } else if (payload.state === 'final') {
-        this.streamHandlers.forEach(h => h('', true));
-        if (payload.message) {
+        this.streamHandlers.forEach((h: StreamHandler) => {
+          h('', true);
+        });
+        if (payload.message !== undefined && payload.message !== null) {
           const msg: ChatMessage = {
             role: 'assistant',
             content: payload.message.content,
             timestamp: Date.now(),
-            id: payload.runId,
+            id: payload.runId
           };
           this.messages.push(msg);
-          this.messageHandlers.forEach(h => h(msg));
+          this.messageHandlers.forEach((h: MessageHandler) => {
+            h(msg);
+          });
         }
       } else if (payload.state === 'error') {
+        const errorMsg: string = payload.errorMessage ?? '未知错误';
         const errMsg: ChatMessage = {
           role: 'system',
-          content: `错误: ${payload.errorMessage || '未知错误'}`,
+          content: `错误: ${errorMsg}`,
           timestamp: Date.now(),
-          id: `err-${Date.now()}`,
+          id: `err-${Date.now()}`
         };
         this.messages.push(errMsg);
-        this.messageHandlers.forEach(h => h(errMsg));
-        this.streamHandlers.forEach(h => h('', true));
+        this.messageHandlers.forEach((h: MessageHandler) => {
+          h(errMsg);
+        });
+        this.streamHandlers.forEach((h: StreamHandler) => {
+          h('', true);
+        });
       }
     });
   }
@@ -51,12 +67,14 @@ export class ChatService {
     // 本地添加用户消息
     const userMsg: ChatMessage = {
       role: 'user',
-      content,
+      content: content,
       timestamp: Date.now(),
-      id: `user-${Date.now()}`,
+      id: `user-${Date.now()}`
     };
     this.messages.push(userMsg);
-    this.messageHandlers.forEach(h => h(userMsg));
+    this.messageHandlers.forEach((h: MessageHandler) => {
+      h(userMsg);
+    });
 
     // 通过 Gateway 发送
     this.connection.sendAgent(content);
@@ -79,7 +97,12 @@ export class ChatService {
   }
 
   getMessages(): ChatMessage[] {
-    return [...this.messages];
+    // 创建数组副本
+    const result: ChatMessage[] = [];
+    for (let i = 0; i < this.messages.length; i++) {
+      result.push(this.messages[i]);
+    }
+    return result;
   }
 
   clearMessages(): void {

@@ -30,7 +30,11 @@ struct Index {
     this.aboutToAppearCalled = true;
 
     // 初始化设置存储
-    await this.settingsStore.init(getContext(this));
+    const uiContext = this.getUIContext();
+    const hostContext = uiContext.getHostContext();
+    if (hostContext !== undefined) {
+      await this.settingsStore.init(hostContext);
+    }
 
     // 读取保存的配置
     this.gatewayUrl = await this.settingsStore.getGatewayUrl();
@@ -40,7 +44,7 @@ struct Index {
     // 更新连接配置
     this.connection.updateConfig({
       url: this.gatewayUrl,
-      autoReconnect: this.settingsAutoReconnect,
+      autoReconnect: this.settingsAutoReconnect
     });
 
     // 监听连接状态
@@ -50,7 +54,13 @@ struct Index {
 
     // 监听消息
     this.chatService.onMessage((msg: ChatMessage) => {
-      this.messages = [...this.messages, msg];
+      // 创建新数组替代 spread 操作符
+      const newMessages: ChatMessage[] = [];
+      for (let i = 0; i < this.messages.length; i++) {
+        newMessages.push(this.messages[i]);
+      }
+      newMessages.push(msg);
+      this.messages = newMessages;
       this.scrollToBottom();
     });
 
@@ -61,7 +71,7 @@ struct Index {
         this.streamingText = '';
       } else {
         this.isStreaming = true;
-        this.streamingText += delta;
+        this.streamingText = this.streamingText + delta;
         this.scrollToBottom();
       }
     });
@@ -101,8 +111,9 @@ struct Index {
           .backgroundColor(Color.Transparent)
           .onClick(() => {
             this.showSettings = true;
-            this.settingsUrl = this.connection.getConfig().url;
-            this.settingsAutoReconnect = this.connection.getConfig().autoReconnect;
+            const config = this.connection.getConfig();
+            this.settingsUrl = config.url;
+            this.settingsAutoReconnect = config.autoReconnect;
           })
         }
         .width('100%')
@@ -120,10 +131,14 @@ struct Index {
               MessageBubble({
                 message: msg.content,
                 isUser: msg.role === 'user',
-                isSystem: msg.role === 'system',
+                isSystem: msg.role === 'system'
               })
             }
-          }, (msg: ChatMessage, index?: number) => msg.id || index?.toString() || '')
+          }, (msg: ChatMessage, index?: number) => {
+            const id = msg.id;
+            const idx = index !== undefined ? index.toString() : '';
+            return id !== undefined ? id : idx;
+          })
 
           // 流式消息气泡
           if (this.isStreaming && this.streamingText.length > 0) {
@@ -131,7 +146,7 @@ struct Index {
               MessageBubble({
                 message: this.streamingText + '▊',
                 isUser: false,
-                isStreaming: true,
+                isStreaming: true
               })
             }
           }
@@ -255,7 +270,7 @@ struct Index {
               this.gatewayUrl = url;
               this.connection.updateConfig({
                 url: url,
-                autoReconnect: this.settingsAutoReconnect,
+                autoReconnect: this.settingsAutoReconnect
               });
               this.connection.disconnect();
               this.connection.connect();
