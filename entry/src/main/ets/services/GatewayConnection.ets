@@ -1,303 +1,261 @@
 import webSocket from '@ohos.net.webSocket';
-import { GatewayFrame, ConnectionConfig, ConnState, ChatMessage, ParamsDict } from '../model/GatewayTypes';
+import {
+  GatewayFrame,
+  ConnectionConfig,
+  ConnState,
+  ClientInfo,
+  ConnectPayload,
+  AgentPayload,
+  AgentMessage,
+  ChatMessage
+} from '../model/GatewayTypes';
 
-// 类型定义
 type FrameHandler = (frame: GatewayFrame) => void;
 type StateHandler = (state: ConnState) => void;
 
-interface PendingHandler {
-  resolve: (value: ParamsDict) => void;
-  reject: (error: Error) => void;
-  timer: number;
-}
-
-// 默认配置
-const DEFAULT_CONFIG: ConnectionConfig = {
-  url: 'ws://192.168.31.44:18789',
-  autoReconnect: true,
-  reconnectInterval: 3000
-};
+const DEFAULT_URL: string = 'ws://192.168.31.44:18789';
 
 export class GatewayConnection {
   private ws: webSocket.WebSocket | null = null;
-  private config: ConnectionConfig;
-  private state: ConnState = ConnState.DISCONNECTED;
-  private eventHandlers: Map<string, Set<FrameHandler>> = new Map<string, Set<FrameHandler>>();
-  private stateHandlers: Set<StateHandler> = new Set<StateHandler>();
-  private requestId: number = 0;
-  private reconnectTimer: number = -1;
-  private messageQueue: string[] = [];
-  private sessionKey: string | null = null;
-  private pendingHandlers: Map<string, PendingHandler> = new Map<string, PendingHandler>();
+  private url: string = DEFAULT_URL;
+  private autoReconnect: boolean = true;
+  private reconnectInterval: number = 3000;
+  private connState: ConnState = ConnState.DISCONNECTED;
+  private sessionId: string | null = null;
 
-  constructor(config?: Partial<ConnectionConfig>) {
-    // 使用 Object.assign 替代 spread 操作符
-    this.config = {} as ConnectionConfig;
-    Object.assign(this.config, DEFAULT_CONFIG);
-    if (config) {
-      Object.assign(this.config, config);
+  private agentHandlers: FrameHandler[] = [];
+  private stateChangeHandlers: StateHandler[] = [];
+  private messageQueue: string[] = [];
+  private reconnectTimerId: number = -1;
+  private reqCounter: number = 0;
+
+  constructor(url?: string) {
+    if (url !== undefined && url !== null && url.length > 0) {
+      this.url = url;
     }
   }
 
   connect(): void {
-    if (this.ws !== null && (this.state === ConnState.CONNECTED || this.state === ConnState.CONNECTING)) {
+    if (this.ws !== null) {
       return;
     }
+    this.connState = ConnState.CONNECTING;
+    this.notifyState();
 
-    this.setState(ConnState.CONNECTING);
+    this.ws = webSocket.createWebSocket();
 
-    try {
-      this.ws = webSocket.createWebSocket();
-      this.ws.connect(this.config.url, (err: Error) => {
-        if (err === undefined || err === null) {
-          console.log('[GatewayConnection] WebSocket transport ready');
-          // 等待 server 的 challenge 事件
+    this.ws.on('open', (err: Error) => {
+      if (err === undefined || err === null) {
+        console.log('[GW] transport open');
+      } else {
+        console.error('[GW] open error:', err.message);
+        this.connState = ConnState.DISCONNECTED;
+        this.notifyState();
+        this.tryReconnect();
+      }
+    });
+
+    this.ws.on('message', (err: Error, data: string | ArrayBuffer) => {
+      if (err !== undefined && err !== null) {
+        return;
+      }
+      try {
+        let text: string = '';
+        if (typeof data === 'string') {
+          text = data;
         } else {
-          console.error('[GatewayConnection] Connect failed:', err.message);
-          this.setState(ConnState.DISCONNECTED);
-          this.scheduleReconnect();
-        }
-      });
-
-      this.ws.on('message', (err: Error, data: webSocket.WebSocketMessage) => {
-        if ((err === undefined || err === null) && data !== undefined && data !== null) {
-          try {
-            const frame: GatewayFrame = JSON.parse(data.result as string) as GatewayFrame;
-            this.handleFrame(frame);
-          } catch (e) {
-            console.error('[GatewayConnection] Parse error:', e);
+          const view = new Uint8Array(data as ArrayBuffer);
+          const arr: number[] = [];
+          for (let i = 0; i < view.length; i++) {
+            arr.push(view[i]);
           }
+          text = String.fromCharCode.apply(null, arr);
         }
-      });
-
-      this.ws.on('error', (err: Error) => {
-        console.error('[GatewayConnection] WebSocket error');
-        this.setState(ConnState.DISCONNECTED);
-      });
-
-      this.ws.on('close', (_err: Error, _code: number, _reason: string) => {
-        console.log('[GatewayConnection] WebSocket closed');
-        this.setState(ConnState.DISCONNECTED);
-        if (this.config.autoReconnect) {
-          this.scheduleReconnect();
+        if (text.length > 0) {
+          this.onFrameReceived(text);
         }
-      });
-    } catch (e) {
-      console.error('[GatewayConnection] Create failed:', e);
-      this.setState(ConnState.DISCONNECTED);
-    }
+      } catch (e) {
+        console.error('[GW] parse error:', e);
+      }
+    });
+
+    this.ws.on('error', (err: Error) => {
+      console.error('[GW] socket error');
+      this.connState = ConnState.DISCONNECTED;
+      this.notifyState();
+    });
+
+    this.ws.on('close', (err: Error, code: number, reason: string) => {
+      console.log('[GW] socket closed');
+      this.ws = null;
+      this.connState = ConnState.DISCONNECTED;
+      this.notifyState();
+      if (this.autoReconnect) {
+        this.tryReconnect();
+      }
+    });
+
+    this.ws.connect(this.url, (err: Error) => {
+      if (err !== undefined && err !== null) {
+        console.error('[GW] connect failed:', err.message);
+        this.connState = ConnState.DISCONNECTED;
+        this.notifyState();
+        this.tryReconnect();
+      }
+    });
   }
 
   disconnect(): void {
-    if (this.reconnectTimer !== -1) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = -1;
+    if (this.reconnectTimerId !== -1) {
+      clearTimeout(this.reconnectTimerId);
+      this.reconnectTimerId = -1;
     }
-    // 清理所有 pending 请求
-    this.pendingHandlers.forEach((entry: PendingHandler, id: string) => {
-      clearTimeout(entry.timer);
-      entry.reject(new Error('Connection closed'));
-    });
-    this.pendingHandlers.clear();
     if (this.ws !== null) {
       this.ws.close();
       this.ws = null;
     }
-    this.sessionKey = null;
-    this.setState(ConnState.DISCONNECTED);
+    this.sessionId = null;
+    this.connState = ConnState.DISCONNECTED;
+    this.notifyState();
   }
 
-  send(method: string, params?: ParamsDict, timeout: number = 30000): Promise<ParamsDict> {
-    return new Promise((resolve: (value: ParamsDict) => void, reject: (error: Error) => void) => {
-      const id: string = `req-${++this.requestId}`;
-
-      // 创建带 session 的参数
-      const paramsWithSession: ParamsDict = {};
-      if (params !== undefined && params !== null) {
-        Object.assign(paramsWithSession, params);
-      }
-      if (this.sessionKey !== null) {
-        paramsWithSession['sessionKey'] = this.sessionKey;
-      }
-
-      const frame: GatewayFrame = {
-        type: 'req',
-        id: id,
-        method: method,
-        params: paramsWithSession
-      };
-
-      // 超时处理，防止内存泄漏
-      const timer: number = setTimeout(() => {
-        this.pendingHandlers.delete(id);
-        reject(new Error(`Request ${method} timed out (${timeout}ms)`));
-      }, timeout);
-
-      // 监听响应
-      const handler = (responseFrame: GatewayFrame): void => {
-        if (responseFrame.id === id) {
-          this.off('res', handler);
-          this.pendingHandlers.delete(id);
-          clearTimeout(timer);
-          if (responseFrame.ok === true) {
-            const payload: ParamsDict = (responseFrame.payload !== undefined && responseFrame.payload !== null)
-              ? responseFrame.payload as ParamsDict
-              : {};
-            resolve(payload);
-          } else {
-            const errorMsg: string = responseFrame.error?.message ?? 'Request failed';
-            reject(new Error(errorMsg));
-          }
-        }
-      };
-
-      this.on('res', handler);
-      this.pendingHandlers.set(id, { resolve, reject, timer });
-
-      const message: string = JSON.stringify(frame);
-      if (this.state === ConnState.CONNECTED && this.ws !== null) {
-        this.ws.send(message);
-      } else {
-        this.messageQueue.push(message);
-      }
+  sendAgent(text: string): void {
+    const params: string = JSON.stringify({
+      message: text,
+      sessionKey: this.sessionId
     });
-  }
-
-  // 发送聊天消息（返回 streaming 内容的更新回调）
-  sendAgent(message: string): void {
-    this.send('agent', { message: message } as ParamsDict)
-      .catch((e: Error) => {
-        console.error('[GatewayConnection] Agent send failed:', e);
-      });
+    const frame: string = JSON.stringify({
+      type: 'req',
+      id: `req-${++this.reqCounter}`,
+      method: 'agent',
+      params: params
+    });
+    this.sendRaw(frame);
   }
 
   getState(): ConnState {
-    return this.state;
+    return this.connState;
   }
 
-  getSessionKey(): string | null {
-    return this.sessionKey;
+  getSessionId(): string | null {
+    return this.sessionId;
   }
 
-  on(event: string, handler: FrameHandler): void {
-    if (!this.eventHandlers.has(event)) {
-      this.eventHandlers.set(event, new Set<FrameHandler>());
-    }
-    const handlers = this.eventHandlers.get(event);
-    if (handlers !== undefined) {
-      handlers.add(handler);
-    }
+  updateUrl(url: string): void {
+    this.url = url;
   }
 
-  off(event: string, handler: FrameHandler): void {
-    const handlers = this.eventHandlers.get(event);
-    if (handlers !== undefined) {
-      handlers.delete(handler);
-    }
+  setAutoReconnect(auto: boolean): void {
+    this.autoReconnect = auto;
+  }
+
+  getUrl(): string {
+    return this.url;
+  }
+
+  isAutoReconnect(): boolean {
+    return this.autoReconnect;
+  }
+
+  onAgent(handler: FrameHandler): void {
+    this.agentHandlers.push(handler);
   }
 
   onStateChange(handler: StateHandler): void {
-    this.stateHandlers.add(handler);
+    this.stateChangeHandlers.push(handler);
   }
 
-  offStateChange(handler: StateHandler): void {
-    this.stateHandlers.delete(handler);
+  private sendRaw(data: string): void {
+    if (this.connState === ConnState.CONNECTED && this.ws !== null) {
+      this.ws.send(data);
+    } else {
+      this.messageQueue.push(data);
+    }
   }
 
-  private handleFrame(frame: GatewayFrame): void {
-    // 处理 challenge → 自动发送 connect
+  private tryReconnect(): void {
+    if (this.reconnectTimerId !== -1) {
+      return;
+    }
+    this.reconnectTimerId = setTimeout((): void => {
+      this.reconnectTimerId = -1;
+      console.log('[GW] reconnecting...');
+      this.ws = null;
+      this.connect();
+    }, this.reconnectInterval);
+  }
+
+  private notifyState(): void {
+    const s: ConnState = this.connState;
+    for (let i = 0; i < this.stateChangeHandlers.length; i++) {
+      try {
+        this.stateChangeHandlers[i](s);
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+
+  private onFrameReceived(raw: string): void {
+    let frame: GatewayFrame;
+    try {
+      frame = JSON.parse(raw) as GatewayFrame;
+    } catch (e) {
+      return;
+    }
+
+    // challenge → 发 connect
     if (frame.type === 'event' && frame.event === 'challenge') {
-      console.log('[GatewayConnection] Received challenge, sending connect');
-      const connectParams: ParamsDict = {
-        client: {
-          id: 'harmonyos-app',
-          platform: 'harmonyos',
-          version: '1.0.0',
-          mode: 'operator'
-        }
+      const client: ClientInfo = {
+        id: 'harmonyos-app',
+        platform: 'harmonyos',
+        version: '1.0.0',
+        mode: 'operator'
       };
-
-      const connectFrame: GatewayFrame = {
+      const connectFrame: string = JSON.stringify({
         type: 'req',
         id: `connect-${Date.now()}`,
         method: 'connect',
-        params: connectParams
-      };
-
+        params: JSON.stringify({ client: client })
+      });
       if (this.ws !== null) {
-        this.ws.send(JSON.stringify(connectFrame));
+        this.ws.send(connectFrame);
       }
+      return;
     }
 
-    // 处理 connect 响应
-    if (frame.type === 'res' && frame.ok === true && frame.payload !== undefined && frame.payload !== null) {
-      const sessionKey = frame.payload.sessionKey;
-      if (typeof sessionKey === 'string') {
-        this.sessionKey = sessionKey;
-        this.setState(ConnState.CONNECTED);
-        // 发送队列中的消息
-        while (this.messageQueue.length > 0) {
-          const msg = this.messageQueue.shift();
-          if (msg !== undefined && this.ws !== null) {
-            this.ws.send(msg);
+    // connect 响应 → 提取 sessionKey
+    if (frame.type === 'res' && frame.ok === true && frame.payload !== undefined) {
+      try {
+        const payload: ConnectPayload = JSON.parse(frame.payload) as ConnectPayload;
+        if (payload.sessionKey !== undefined && payload.sessionKey.length > 0) {
+          this.sessionId = payload.sessionKey;
+          this.connState = ConnState.CONNECTED;
+          this.notifyState();
+          // flush queue
+          while (this.messageQueue.length > 0) {
+            const msg = this.messageQueue.shift();
+            if (msg !== undefined && this.ws !== null) {
+              this.ws.send(msg);
+            }
           }
+        }
+      } catch (e) {
+        // ignore parse error
+      }
+      return;
+    }
+
+    // agent 事件
+    if (frame.type === 'event' && frame.event === 'agent') {
+      const handlers = this.agentHandlers;
+      for (let i = 0; i < handlers.length; i++) {
+        try {
+          handlers[i](frame);
+        } catch (e) {
+          // ignore
         }
       }
     }
-
-    // 分发事件
-    let eventType: string | undefined;
-    if (frame.type === 'event') {
-      eventType = frame.event;
-    } else {
-      eventType = frame.type;
-    }
-
-    if (eventType !== undefined) {
-      const handlers = this.eventHandlers.get(eventType);
-      if (handlers !== undefined) {
-        handlers.forEach((h: FrameHandler) => {
-          try {
-            h(frame);
-          } catch (e) {
-            console.error('[GatewayConnection] Handler error:', e);
-          }
-        });
-      }
-    }
-  }
-
-  private setState(newState: ConnState): void {
-    this.state = newState;
-    this.stateHandlers.forEach((h: StateHandler) => {
-      try {
-        h(newState);
-      } catch (e) {
-        console.error('[GatewayConnection] State handler error:', e);
-      }
-    });
-  }
-
-  private scheduleReconnect(): void {
-    if (this.reconnectTimer !== -1) return;
-
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = -1;
-      console.log('[GatewayConnection] Reconnecting...');
-      this.connect();
-    }, this.config.reconnectInterval);
-  }
-
-  updateConfig(config: Partial<ConnectionConfig>): void {
-    Object.assign(this.config, config);
-  }
-
-  getConfig(): ConnectionConfig {
-    const result: ConnectionConfig = {
-      url: this.config.url,
-      autoReconnect: this.config.autoReconnect,
-      reconnectInterval: this.config.reconnectInterval
-    };
-    return result;
   }
 }

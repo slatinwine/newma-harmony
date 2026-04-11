@@ -8,7 +8,6 @@ export struct MessageBubble {
   build() {
     Row() {
       if (!this.isUser && !this.isSystem) {
-        // AI 头像
         Column() {
           Text('🤖')
             .fontSize(20)
@@ -38,18 +37,12 @@ export struct MessageBubble {
       .padding({ left: 14, right: 14, top: 10, bottom: 10 })
       .constraintSize({ maxWidth: '75%' })
       .borderRadius(this.isUser ? { topLeft: 4, topRight: 16, bottomLeft: 16, bottomRight: 16 } :
-      { topLeft: 16, topRight: 4, bottomLeft: 16, bottomRight: 16 })
+        { topLeft: 16, topRight: 4, bottomLeft: 16, bottomRight: 16 })
       .backgroundColor(this.isSystem ? '#FFEBEE' : (this.isUser ? '#1976D2' : '#FFFFFF'))
-      .shadow(this.isUser ? {} : {
-        radius: 2,
-        color: '#0000000D',
-        offsetX: 0,
-        offsetY: 1,
-      })
-      .alignItems(this.isUser ? HAlign.End : HAlign.Start)
+      .shadow({ radius: 2, color: '#1A000000', offsetX: 0, offsetY: 1 })
+      .alignItems(this.isUser ? HorizontalAlign.End : HorizontalAlign.Start)
 
       if (this.isUser) {
-        // 用户头像
         Column() {
           Text('👤')
             .fontSize(20)

@@ -1,64 +1,68 @@
 // Gateway 协议类型定义
 
-// 字典类型替代 ESObject
-export type StringDict = Record<string, string | number | boolean | null | undefined>;
-export type ParamsDict = Record<string, StringDict | string | number | boolean | null | undefined>;
-
-// Gateway 帧
 export interface GatewayFrame {
-  type: 'req' | 'res' | 'event';
+  type: string;
   id?: string;
   method?: string;
   event?: string;
-  params?: ParamsDict;
-  payload?: PayloadDict;
+  params?: string;
+  payload?: string;
   ok?: boolean;
   error?: GatewayError;
-}
-
-export interface PayloadDict {
-  [key: string]: string | number | boolean | null | undefined | StringDict;
-  sessionKey?: string;
-  runId?: string;
-  state?: string;
-  delta?: string;
-  message?: ChatMessage;
-  errorMessage?: string;
 }
 
 export interface GatewayError {
   code: string;
   message: string;
-  details?: ParamsDict;
 }
 
-// 聊天消息
 export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system';
+  role: string;
   content: string;
   timestamp: number;
   id?: string;
-  isStreaming?: boolean;
 }
 
-// Agent 事件
-export interface AgentEvent {
-  runId: string;
-  sessionKey: string;
-  state: 'delta' | 'final' | 'aborted' | 'error';
-  message?: ChatMessage;
-  delta?: string;
-  errorMessage?: string;
-}
-
-// 连接配置
 export interface ConnectionConfig {
   url: string;
   autoReconnect: boolean;
   reconnectInterval: number;
 }
 
-// 连接状态枚举
+export interface ClientInfo {
+  id: string;
+  platform: string;
+  version: string;
+  mode: string;
+}
+
+export interface AgentEvent {
+  runId: string;
+  sessionKey: string;
+  state: string;
+  message?: string;
+  delta?: string;
+  errorMessage?: string;
+}
+
+export interface AgentMessage {
+  role: string;
+  content: string;
+}
+
+export interface AgentPayload {
+  runId: string;
+  sessionKey: string;
+  state: string;
+  delta?: string;
+  message?: AgentMessage;
+  errorMessage?: string;
+}
+
+export interface ConnectPayload {
+  sessionKey: string;
+}
+
 export enum ConnState {
   DISCONNECTED = 0,
   CONNECTING = 1,

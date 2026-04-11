@@ -1,5 +1,5 @@
 import { preferences } from '@kit.ArkData';
-import { Context } from '@kit.AbilityKit';
+import { common } from '@kit.AbilityKit';
 
 const STORE_NAME: string = 'newma_chat_prefs';
 const DEFAULT_GATEWAY_URL: string = 'ws://192.168.31.44:18789';
@@ -8,7 +8,7 @@ const DEFAULT_AUTO_RECONNECT: boolean = true;
 export class SettingsStore {
   private store: preferences.Preferences | null = null;
 
-  async init(context: Context): Promise<void> {
+  async init(context: common.UIAbilityContext): Promise<void> {
     try {
       this.store = await preferences.getPreferences(context, STORE_NAME);
     } catch (e) {
@@ -21,8 +21,11 @@ export class SettingsStore {
       return DEFAULT_GATEWAY_URL;
     }
     try {
-      const value = await this.store.get('gateway_url', DEFAULT_GATEWAY_URL);
-      return value as string;
+      const val: preferences.ValueType = await this.store.get('gateway_url', DEFAULT_GATEWAY_URL);
+      if (typeof val === 'string') {
+        return val;
+      }
+      return DEFAULT_GATEWAY_URL;
     } catch (e) {
       console.error('[SettingsStore] Get gateway URL failed:', e);
       return DEFAULT_GATEWAY_URL;
@@ -46,8 +49,11 @@ export class SettingsStore {
       return DEFAULT_AUTO_RECONNECT;
     }
     try {
-      const value = await this.store.get('auto_reconnect', DEFAULT_AUTO_RECONNECT);
-      return value as boolean;
+      const val: preferences.ValueType = await this.store.get('auto_reconnect', DEFAULT_AUTO_RECONNECT);
+      if (typeof val === 'boolean') {
+        return val;
+      }
+      return DEFAULT_AUTO_RECONNECT;
     } catch (e) {
       console.error('[SettingsStore] Get auto reconnect failed:', e);
       return DEFAULT_AUTO_RECONNECT;

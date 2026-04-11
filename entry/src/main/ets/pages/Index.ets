@@ -5,6 +5,7 @@ import { MessageBubble } from '../components/MessageBubble';
 import { ConnectionStatus } from '../components/ConnectionStatus';
 import { InputBar } from '../components/InputBar';
 import { ChatMessage, ConnState } from '../model/GatewayTypes';
+import { common } from '@kit.AbilityKit';
 
 @Entry
 @Component
@@ -17,55 +18,47 @@ struct Index {
   @State showSettings: boolean = false;
   @State settingsUrl: string = '';
   @State settingsAutoReconnect: boolean = true;
-  @State scrollOffset: number = 0;
 
   private connection: GatewayConnection = new GatewayConnection();
   private chatService: ChatService = new ChatService(this.connection);
   private settingsStore: SettingsStore = new SettingsStore();
   private scroller: Scroller = new Scroller();
-  private aboutToAppearCalled: boolean = false;
+  private inited: boolean = false;
 
   async aboutToAppear(): Promise<void> {
-    if (this.aboutToAppearCalled) return;
-    this.aboutToAppearCalled = true;
+    if (this.inited) {
+      return;
+    }
+    this.inited = true;
 
-    // 初始化设置存储
     const uiContext = this.getUIContext();
     const hostContext = uiContext.getHostContext();
     if (hostContext !== undefined) {
-      await this.settingsStore.init(hostContext);
+      await this.settingsStore.init(hostContext as common.UIAbilityContext);
     }
 
-    // 读取保存的配置
     this.gatewayUrl = await this.settingsStore.getGatewayUrl();
     this.settingsUrl = this.gatewayUrl;
     this.settingsAutoReconnect = await this.settingsStore.getAutoReconnect();
 
-    // 更新连接配置
-    this.connection.updateConfig({
-      url: this.gatewayUrl,
-      autoReconnect: this.settingsAutoReconnect
-    });
+    this.connection.updateUrl(this.gatewayUrl);
+    this.connection.setAutoReconnect(this.settingsAutoReconnect);
 
-    // 监听连接状态
-    this.connection.onStateChange((state: ConnState) => {
+    this.connection.onStateChange((state: ConnState): void => {
       this.connState = state;
     });
 
-    // 监听消息
-    this.chatService.onMessage((msg: ChatMessage) => {
-      // 创建新数组替代 spread 操作符
-      const newMessages: ChatMessage[] = [];
+    this.chatService.onMessage((msg: ChatMessage): void => {
+      const arr: ChatMessage[] = [];
       for (let i = 0; i < this.messages.length; i++) {
-        newMessages.push(this.messages[i]);
+        arr.push(this.messages[i]);
       }
-      newMessages.push(msg);
-      this.messages = newMessages;
+      arr.push(msg);
+      this.messages = arr;
       this.scrollToBottom();
     });
 
-    // 监听流式输出
-    this.chatService.onStream((delta: string, isFinal: boolean) => {
+    this.chatService.onStream((delta: string, isFinal: boolean): void => {
       if (isFinal) {
         this.isStreaming = false;
         this.streamingText = '';
@@ -76,7 +69,6 @@ struct Index {
       }
     });
 
-    // 自动连接
     this.connection.connect();
   }
 
@@ -85,12 +77,13 @@ struct Index {
   }
 
   scrollToBottom(): void {
-    this.scroller.scrollToIndex(this.messages.length - 1, true);
+    if (this.messages.length > 0) {
+      this.scroller.scrollToIndex(this.messages.length - 1, true);
+    }
   }
 
   build() {
     Stack() {
-      // 主界面
       Column() {
         // 顶部栏
         Row() {
@@ -109,11 +102,10 @@ struct Index {
           .height(40)
           .type(ButtonType.Circle)
           .backgroundColor(Color.Transparent)
-          .onClick(() => {
+          .onClick((): void => {
             this.showSettings = true;
-            const config = this.connection.getConfig();
-            this.settingsUrl = config.url;
-            this.settingsAutoReconnect = config.autoReconnect;
+            this.settingsUrl = this.connection.getUrl();
+            this.settingsAutoReconnect = this.connection.isAutoReconnect();
           })
         }
         .width('100%')
@@ -125,7 +117,7 @@ struct Index {
         ConnectionStatus({ state: this.connState as number, gatewayUrl: this.gatewayUrl })
 
         // 消息列表
-        List({ space: 4, initialIndex: 0 }) {
+        List({ space: 4 }) {
           ForEach(this.messages, (msg: ChatMessage, index?: number) => {
             ListItem() {
               MessageBubble({
@@ -134,13 +126,16 @@ struct Index {
                 isSystem: msg.role === 'system'
               })
             }
-          }, (msg: ChatMessage, index?: number) => {
-            const id = msg.id;
-            const idx = index !== undefined ? index.toString() : '';
-            return id !== undefined ? id : idx;
+          }, (msg: ChatMessage, index?: number): string => {
+            if (msg.id !== undefined) {
+              return msg.id;
+            }
+            if (index !== undefined) {
+              return `msg-${index}`;
+            }
+            return 'msg-unknown';
           })
 
-          // 流式消息气泡
           if (this.isStreaming && this.streamingText.length > 0) {
             ListItem() {
               MessageBubble({
@@ -154,7 +149,6 @@ struct Index {
         .layoutWeight(1)
         .width('100%')
         .scrollBar(BarState.Auto)
-        .scroller(this.scroller)
         .alignListItem(ListItemAlign.Start)
         .edgeEffect(EdgeEffect.Spring)
         .backgroundColor('#F5F5F5')
@@ -162,7 +156,7 @@ struct Index {
         // 输入栏
         InputBar({
           isEnabled: this.connState === ConnState.CONNECTED,
-          onSend: (text: string) => {
+          onSend: (text: string): void => {
             this.chatService.sendMessage(text);
           }
         })
@@ -182,16 +176,14 @@ struct Index {
   @Builder
   SettingsPanel() {
     Column() {
-      // 遮罩
       Column()
         .width('100%')
         .height('100%')
         .backgroundColor('#80000000')
-        .onClick(() => {
+        .onClick((): void => {
           this.showSettings = false;
         })
 
-      // 设置面板（从底部弹出）
       Column({ space: 16 }) {
         Row() {
           Text('设置')
@@ -205,7 +197,7 @@ struct Index {
           }
           .type(ButtonType.Circle)
           .backgroundColor(Color.Transparent)
-          .onClick(() => {
+          .onClick((): void => {
             this.showSettings = false;
           })
         }
@@ -214,7 +206,6 @@ struct Index {
 
         Divider()
 
-        // Gateway URL
         Column({ space: 8 }) {
           Text('Gateway 地址')
             .fontSize(14)
@@ -222,7 +213,7 @@ struct Index {
           TextInput({ text: this.settingsUrl, placeholder: 'ws://host:port' })
             .width('100%')
             .fontSize(16)
-            .onChange((value: string) => {
+            .onChange((value: string): void => {
               this.settingsUrl = value;
             })
         }
@@ -230,55 +221,49 @@ struct Index {
         .width('100%')
         .padding({ left: 20, right: 20 })
 
-        // 自动重连开关
         Row() {
           Text('自动重连')
             .fontSize(16)
             .layoutWeight(1)
           Toggle({ type: ToggleType.Switch, isOn: this.settingsAutoReconnect })
-            .onChange((isOn: boolean) => {
+            .onChange((isOn: boolean): void => {
               this.settingsAutoReconnect = isOn;
             })
         }
         .width('100%')
         .padding({ left: 20, right: 20 })
 
-        // 清空聊天
         Button('清空聊天记录')
           .width('100%')
           .fontSize(16)
           .fontColor('#C62828')
           .backgroundColor('#FFEBEE')
           .margin({ left: 20, right: 20 })
-          .onClick(() => {
+          .onClick((): void => {
             this.chatService.clearMessages();
             this.messages = [];
           })
 
-        // 保存并重连
         Button('保存并重连')
           .width('100%')
           .fontSize(16)
           .fontWeight(FontWeight.Medium)
           .type(ButtonType.Capsule)
           .margin({ left: 20, right: 20, bottom: 20 })
-          .onClick(async () => {
+          .onClick(async (): Promise<void> => {
             const url = this.settingsUrl.trim();
             if (url.length > 0) {
               await this.settingsStore.setGatewayUrl(url);
               await this.settingsStore.setAutoReconnect(this.settingsAutoReconnect);
               this.gatewayUrl = url;
-              this.connection.updateConfig({
-                url: url,
-                autoReconnect: this.settingsAutoReconnect
-              });
+              this.connection.updateUrl(url);
+              this.connection.setAutoReconnect(this.settingsAutoReconnect);
               this.connection.disconnect();
               this.connection.connect();
             }
             this.showSettings = false;
           })
 
-        // 版本信息
         Text('版本 1.0.0 · HarmonyOS 原生')
           .fontSize(12)
           .fontColor('#9E9E9E')
