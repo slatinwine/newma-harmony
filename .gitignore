@@ -4,3 +4,6 @@ oh_modules
 build
 .cxx
 **/*.so
+local.properties
+.hvigor
+entry/.preview

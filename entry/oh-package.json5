@@ -1,5 +1,9 @@
 {
-  "modelVersion": "5.0.0",
-  "description": "Please describe the basic information.",
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "Newma AI Chat - HarmonyOS 原生实现",
+  "main": "",
+  "author": "",
+  "license": "MIT",
   "dependencies": {}
 }

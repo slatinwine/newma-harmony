@@ -1,5 +1,5 @@
 import webSocket from '@ohos.net.webSocket';
-import { GatewayFrame, ConnectionConfig, ConnState, AgentEvent, ChatMessage } from '../model/GatewayTypes';
+import { GatewayFrame, ConnectionConfig, ConnState, ChatMessage } from '../model/GatewayTypes';
 
 type FrameHandler = (frame: GatewayFrame) => void;
 type StateHandler = (state: ConnState) => void;
@@ -14,7 +14,7 @@ export class GatewayConnection {
   private reconnectTimer: number = -1;
   private messageQueue: string[] = [];
   private sessionKey: string | null = null;
-  private streamingContent: string = '';
+  private pendingHandlers: Map<string, { resolve: (v: ESObject) => void; reject: (e: Error) => void; timer: number }> = new Map();
 
   constructor(config?: Partial<ConnectionConfig>) {
     this.config = {
@@ -79,14 +79,21 @@ export class GatewayConnection {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = -1;
     }
+    // 清理所有 pending 请求
+    this.pendingHandlers.forEach((entry, id) => {
+      clearTimeout(entry.timer);
+      entry.reject(new Error('Connection closed'));
+    });
+    this.pendingHandlers.clear();
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
+    this.sessionKey = null;
     this.setState(ConnState.DISCONNECTED);
   }
 
-  send(method: string, params?: ESObject): Promise<ESObject> {
+  send(method: string, params?: ESObject, timeout: number = 30000): Promise<ESObject> {
     return new Promise((resolve, reject) => {
       const id = `req-${++this.requestId}`;
       const paramsWithSession = this.sessionKey
@@ -100,10 +107,18 @@ export class GatewayConnection {
         params: paramsWithSession,
       };
 
+      // 超时处理，防止内存泄漏
+      const timer = setTimeout(() => {
+        this.pendingHandlers.delete(id);
+        reject(new Error(`Request ${method} timed out (${timeout}ms)`));
+      }, timeout);
+
       // 监听响应
       const handler = (responseFrame: GatewayFrame) => {
         if (responseFrame.id === id) {
           this.off('res', handler);
+          this.pendingHandlers.delete(id);
+          clearTimeout(timer);
           if (responseFrame.ok) {
             resolve(responseFrame.payload || {});
           } else {
@@ -112,6 +127,7 @@ export class GatewayConnection {
         }
       };
       this.on('res', handler);
+      this.pendingHandlers.set(id, { resolve, reject, timer });
 
       const message = JSON.stringify(frame);
       if (this.state === ConnState.CONNECTED && this.ws) {
@@ -124,9 +140,7 @@ export class GatewayConnection {
 
   // 发送聊天消息（返回 streaming 内容的更新回调）
   sendAgent(message: string): void {
-    // 添加用户消息到本地
-    this.streamingContent = '';
-    this.send('agent', { message: message, sessionKey: 'main' }).catch((e) => {
+    this.send('agent', { message: message });
       console.error('[GatewayConnection] Agent send failed:', e);
     });
   }
