@@ -6,11 +6,25 @@ import {
   ToolCallMessage,
   ToolResultMessage
 } from '../model/GatewayTypes';
-
 type MessageHandler = (message: ChatMessage) => void;
 type StreamHandler = (delta: string, isFinal: boolean) => void;
 type ToolCallHandler = (toolCall: ToolCallMessage) => void;
 type ToolResultHandler = (toolResult: ToolResultMessage) => void;
+interface ToolCallArgs {
+  query: string;
+}
+
+interface ToolCallInfo {
+  id: string;
+  name: string;
+  args: ToolCallArgs;
+}
+
+interface ToolResultInfo {
+  id: string;
+  name: string;
+  result: string;
+}
 
 export class ChatService {
   private connection: GatewayConnection;
@@ -78,7 +92,7 @@ export class ChatService {
             const toolCall: ToolCallMessage = {
               role: 'tool_call',
               toolName: toolCallInfo.name,
-              toolArgs: toolCallInfo.args,
+              toolArgs: JSON.stringify(toolCallInfo.args),
               timestamp: Date.now(),
               id: toolCallInfo.id
             };
@@ -179,7 +193,7 @@ export class ChatService {
   }
 
   // Extract tool call information from payload
-  private extractToolCalls(payload: string): { id: string; name: string; args: string } | null {
+  private extractToolCalls(payload: string): ToolCallInfo | null {
     // Extract toolCalls array
     const toolCallsKey = '"toolCalls"';
     const toolCallsIdx = payload.indexOf(toolCallsKey);
@@ -237,13 +251,14 @@ export class ChatService {
       }
     }
     if (id !== null && name !== null) {
-      return { id, name, args };
+      const result: ToolCallInfo = { id: id, name: name, args: { query: args } as ToolCallArgs };
+      return result;
     }
     return null;
   }
 
   // Extract tool result information from payload
-  private extractToolResult(payload: string): { id: string; name: string; result: string } | null {
+  private extractToolResult(payload: string): ToolResultInfo | null {
     const toolResultKey = '"toolResult"';
     const toolResultIdx = payload.indexOf(toolResultKey);
     if (toolResultIdx < 0) {
@@ -275,7 +290,8 @@ export class ChatService {
     const name = this.extractField(objStr, 'name');
     const result = this.extractField(objStr, 'result');
     if (id !== null && name !== null && result !== null) {
-      return { id, name, result };
+      const info: ToolResultInfo = { id: id, name: name, result: result };
+      return info;
     }
     return null;
   }

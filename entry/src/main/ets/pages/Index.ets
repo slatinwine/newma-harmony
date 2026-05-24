@@ -145,32 +145,7 @@ struct Index {
         List({ space: 4 }) {
           ForEach(this.messages, (msg: MessageItem, index?: number) => {
             ListItem() {
-              if (msg.role === 'tool_call') {
-                const tc = msg as ToolCallMessage;
-                MessageBubble({
-                  message: tc.toolArgs,
-                  isUser: false,
-                  isSystem: false,
-                  isToolCall: true,
-                  toolName: tc.toolName
-                })
-              } else if (msg.role === 'tool_result') {
-                const tr = msg as ToolResultMessage;
-                MessageBubble({
-                  message: tr.result,
-                  isUser: false,
-                  isSystem: false,
-                  isToolResult: true,
-                  toolName: tr.toolName
-                })
-              } else {
-                const cm = msg as ChatMessage;
-                MessageBubble({
-                  message: cm.content,
-                  isUser: cm.role === 'user',
-                  isSystem: cm.role === 'system'
-                })
-              }
+              this.MessageBubbleRouter(msg)
             }
           }, (msg: MessageItem, index?: number): string => {
             if (msg.id !== undefined) {
@@ -223,6 +198,33 @@ struct Index {
         // dismissed
       }
     })
+  }
+
+  @Builder
+  MessageBubbleRouter(msg: MessageItem) {
+    if (msg.role === 'tool_call') {
+      MessageBubble({
+        message: (msg as ToolCallMessage).toolArgs,
+        isUser: false,
+        isSystem: false,
+        isToolCall: true,
+        toolName: (msg as ToolCallMessage).toolName
+      })
+    } else if (msg.role === 'tool_result') {
+      MessageBubble({
+        message: (msg as ToolResultMessage).result,
+        isUser: false,
+        isSystem: false,
+        isToolResult: true,
+        toolName: (msg as ToolResultMessage).toolName
+      })
+    } else {
+      MessageBubble({
+        message: (msg as ChatMessage).content,
+        isUser: (msg as ChatMessage).role === 'user',
+        isSystem: (msg as ChatMessage).role === 'system'
+      })
+    }
   }
 
   @Builder
