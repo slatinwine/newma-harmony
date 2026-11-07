@@ -47,3 +47,7 @@ harmonynewma/
 - challenge → connect 握手
 - req/res 请求响应
 - event 流式推送
+
+## 关注公众号
+
+![公众号二维码](qrcode.jpg)
